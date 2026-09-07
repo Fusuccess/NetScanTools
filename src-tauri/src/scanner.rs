@@ -186,7 +186,6 @@ pub async fn run_port_scan(
     cancel: CancellationToken,
 ) {
     let total = ports.len();
-    let emit_closed = total <= 2048;
     let done = Arc::new(AtomicUsize::new(0));
     let open = Arc::new(AtomicUsize::new(0));
     let closed = Arc::new(AtomicUsize::new(0));
@@ -194,6 +193,17 @@ pub async fn run_port_scan(
     let queue = Arc::new(Mutex::new(ports.into_iter()));
     let timeout = Duration::from_millis(timeout_ms.max(50));
     let workers = concurrency.clamp(1, 256) as usize;
+    let _ = app.emit(
+        "scan:progress",
+        ProgressPayload {
+            task_id: task_id.clone(),
+            done: 0,
+            total,
+            open: 0,
+            closed: 0,
+            timeout: 0,
+        },
+    );
     let mut joins = Vec::new();
 
     for _ in 0..workers {
@@ -216,21 +226,15 @@ pub async fn run_port_scan(
                 match row.state.as_str() {
                     "open" => {
                         open.fetch_add(1, Ordering::Relaxed);
-                        let _ = app.emit("scan:port", &row);
                     }
                     "closed" => {
                         closed.fetch_add(1, Ordering::Relaxed);
-                        if emit_closed {
-                            let _ = app.emit("scan:port", &row);
-                        }
                     }
                     _ => {
                         timed.fetch_add(1, Ordering::Relaxed);
-                        if emit_closed {
-                            let _ = app.emit("scan:port", &row);
-                        }
                     }
                 }
+                let _ = app.emit("scan:port", &row);
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                 if n % 8 == 0 || n == total {
                     let _ = app.emit(

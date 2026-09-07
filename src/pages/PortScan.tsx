@@ -25,7 +25,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   const [timeoutN, setTimeoutN] = useState(0);
   const [error, setError] = useState("");
   const [finished, setFinished] = useState(false);
-  const [filter, setFilter] = useState<StatusFilter>("all");
+  const [filter, setFilter] = useState<StatusFilter>("open");
 
   useEffect(() => {
     if (target) setIp(target);
@@ -74,7 +74,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
     setClosed(0);
     setTimeoutN(0);
     setFinished(false);
-    setFilter("all");
+    setFilter("open");
     setScanning(true);
     try {
       await api.startPortScan({ ip, ports: portsSpec(), timeoutMs, concurrency });
@@ -85,9 +85,19 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   }
 
   const status = scanning ? "扫描中" : finished ? "已完成" : "就绪";
-  const visible = useMemo(
-    () => (filter === "all" ? rows : rows.filter((r) => r.state === filter)),
-    [rows, filter],
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const visible = useMemo(() => {
+    const list = filter === "all" ? rows : rows.filter((r) => r.state === filter);
+    return [...list].sort((a, b) => a.port - b.port);
+  }, [rows, filter]);
+  const counts = useMemo(
+    () => ({
+      all: rows.length,
+      open: rows.filter((r) => r.state === "open").length,
+      closed: rows.filter((r) => r.state === "closed").length,
+      timeout: rows.filter((r) => r.state === "timeout").length,
+    }),
+    [rows],
   );
 
   return (
@@ -120,19 +130,22 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
         </div>
       )}
       {error && <div className="error">{error}</div>}
+      <div className="progress">
+        <div className="bar"><i style={{ width: `${pct}%` }} /></div>
+        <span>{pct}% ({done}/{total || 0})</span>
+      </div>
       <div className="stats">
         扫描状态: {status}
-        {total > 0 ? ` | 进度 ${done}/${total}` : ""}
-        {preset === "1-65535" ? "（全端口仅列出开放项）" : ""}
+        {` | 开放 ${open} / 关闭 ${closed} / 超时 ${timeoutN}`}
       </div>
       <div className="toolbar">
         结果筛选:
         {(
           [
-            ["all", "全部", rows.length],
-            ["open", "开放", open],
-            ["closed", "关闭", closed],
-            ["timeout", "超时", timeoutN],
+            ["all", "全部", counts.all],
+            ["open", "开放", counts.open],
+            ["closed", "关闭", counts.closed],
+            ["timeout", "超时", counts.timeout],
           ] as const
         ).map(([id, label, count]) => (
           <button
@@ -144,6 +157,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
           </button>
         ))}
       </div>
+      <p className="muted">关闭是对端拒绝连接；无响应会记为超时，请看「超时」而不是「关闭」。</p>
       <table className="data">
         <thead>
           <tr>
