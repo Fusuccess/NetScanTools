@@ -19,9 +19,14 @@ struct TunnelRuntime {
     started: Instant,
 }
 
+struct ScanSlot {
+    id: String,
+    cancel: CancellationToken,
+}
+
 #[derive(Default)]
 struct AppState {
-    scan: Mutex<Option<CancellationToken>>,
+    scan: Mutex<Option<ScanSlot>>,
     tunnels: Mutex<HashMap<String, TunnelRuntime>>,
 }
 
@@ -77,15 +82,16 @@ async fn start_lan_scan(
         return Err("请至少勾选 ICMP 或 TCP 探测".into());
     }
     let hosts = scanner::parse_range(&req.range)?;
-    let cancel = take_scan_slot(&state)?;
     let task_id = Uuid::new_v4().to_string();
+    let cancel = take_scan_slot(&state, &task_id)?;
     let app2 = app.clone();
+    let app3 = app.clone();
     let cancel2 = cancel.clone();
     let task2 = task_id.clone();
     tokio::spawn(async move {
         scanner::run_lan_scan(
             app2,
-            task2,
+            task2.clone(),
             hosts,
             req.icmp,
             req.tcp_probe,
@@ -94,6 +100,7 @@ async fn start_lan_scan(
             cancel2,
         )
         .await;
+        release_scan_slot(&app3, &task2);
     });
     Ok(serde_json::json!({ "taskId": task_id }))
 }
@@ -106,22 +113,24 @@ async fn start_port_scan(
 ) -> Result<serde_json::Value, String> {
     let ip = req.ip.parse().map_err(|_| "目标 IP 无效".to_string())?;
     let ports = scanner::parse_ports(&req.ports)?;
-    let cancel = take_scan_slot(&state)?;
     let task_id = Uuid::new_v4().to_string();
+    let cancel = take_scan_slot(&state, &task_id)?;
     let app2 = app.clone();
+    let app3 = app.clone();
     let cancel2 = cancel.clone();
     let task2 = task_id.clone();
     tokio::spawn(async move {
-        scanner::run_port_scan(app2, task2, ip, ports, req.timeout_ms, req.concurrency, cancel2)
+        scanner::run_port_scan(app2, task2.clone(), ip, ports, req.timeout_ms, req.concurrency, cancel2)
             .await;
+        release_scan_slot(&app3, &task2);
     });
     Ok(serde_json::json!({ "taskId": task_id }))
 }
 
 #[tauri::command]
 fn cancel_scan(state: State<AppState>) -> Result<(), String> {
-    if let Some(token) = state.scan.lock().map_err(|e| e.to_string())?.take() {
-        token.cancel();
+    if let Some(slot) = state.scan.lock().map_err(|e| e.to_string())?.take() {
+        slot.cancel.cancel();
     }
     Ok(())
 }
@@ -231,14 +240,27 @@ fn delete_tunnel(app: AppHandle, state: State<AppState>, arg: IdArg) -> Result<(
     store::save_tunnels(&dir, &tunnels)
 }
 
-fn take_scan_slot(state: &AppState) -> Result<CancellationToken, String> {
+fn take_scan_slot(state: &AppState, task_id: &str) -> Result<CancellationToken, String> {
     let mut slot = state.scan.lock().map_err(|e| e.to_string())?;
-    if slot.as_ref().is_some_and(|t| !t.is_cancelled()) {
+    if slot.as_ref().is_some_and(|s| !s.cancel.is_cancelled()) {
         return Err("请先取消当前扫描".into());
     }
     let token = CancellationToken::new();
-    *slot = Some(token.clone());
+    *slot = Some(ScanSlot {
+        id: task_id.to_string(),
+        cancel: token.clone(),
+    });
     Ok(token)
+}
+
+fn release_scan_slot(app: &AppHandle, task_id: &str) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut slot) = state.scan.lock() {
+            if slot.as_ref().is_some_and(|s| s.id == task_id) {
+                *slot = None;
+            }
+        }
+    }
 }
 
 fn views(app: &AppHandle, state: &AppState) -> Result<Vec<ssh::SshTunnelView>, String> {
