@@ -4,7 +4,7 @@
 
 面向个人和运维自用：扫描自己有权限的网络，发现局域网设备、探测指定 IP 的端口、经跳板建立 SSH 隧道，以及把本机某个入口端口映射到目标地址。不做 Linux 安装包，不捆绑 nmap。不采用 Electron 或 Flutter。
 
-当前仓库只有项目说明，应用代码尚未开始。界面以 `NetScanTools_UI_Prototype.md` 为准，实现以 `开发设计书.md` 为准。
+当前仓库已开始一期实现。界面以 `NetScanTools_UI_Prototype.md` 为准，实现以 `开发设计书.md` 为准。
 
 ## 能做什么
 
@@ -157,7 +157,21 @@ SSH 自己用 Rust 实现协议，不调用系统 `ssh`。密码存系统钥匙�
 - **Windows：** 首次运行可能弹出防火墙询问。部分杀毒软件会把端口扫描报成风险软件，需要正规签名。
 - 只扫描自己有权限的网络。工具本身加并发上限和可取消，避免把网扫死。
 
-## 已确定的约定
+## 开发
+
+需要 Node.js 与 Rust（rustup）。
+
+```bash
+npm install
+npm run tauri dev
+```
+
+打包：
+
+```bash
+npm run tauri build
+```
+
 
 - 技术栈已锁定：Tauri 2 + React + Rust，不以其他框架实现
 - SSH 一期只做本地转发（`-L`）
