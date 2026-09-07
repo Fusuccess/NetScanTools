@@ -2,7 +2,7 @@ use crate::oui;
 use ipnetwork::Ipv4Network;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -14,6 +14,13 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 const PROBE_PORTS: [u16; 5] = [22, 80, 443, 445, 3389];
+
+#[derive(Clone, Debug)]
+struct ArpEntry {
+    mac: String,
+    kind: String,
+    name: Option<String>,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -267,7 +274,7 @@ async fn probe_host(
     icmp: bool,
     tcp_probe: bool,
     timeout: Duration,
-    arp: &HashMap<String, (String, String)>,
+    arp: &HashMap<String, ArpEntry>,
 ) -> Option<HostRow> {
     let started = Instant::now();
     let mut alive = false;
@@ -293,20 +300,22 @@ async fn probe_host(
     }
 
     let ip_s = ip.to_string();
-    let hostname = tokio::task::spawn_blocking({
-        let addr = std::net::IpAddr::V4(ip);
-        move || dns_lookup::lookup_addr(&addr).ok()
-    })
-    .await
-    .ok()
-    .flatten();
+    let cached = arp.get(&ip_s).cloned();
+    let entry = tokio::task::spawn_blocking(move || lookup_one_arp(ip))
+        .await
+        .ok()
+        .flatten()
+        .or(cached);
 
-    let (mac, arp_kind) = arp
-        .get(&ip_s)
-        .cloned()
-        .map(|(m, k)| (Some(m), Some(k)))
-        .unwrap_or((None, None));
+    let (mac, arp_kind, arp_name) = match entry {
+        Some(e) => (Some(e.mac), Some(e.kind), e.name),
+        None => (None, None, None),
+    };
     let vendor = mac.as_ref().map(|m| oui::lookup(m));
+    let hostname = tokio::task::spawn_blocking(move || resolve_hostname(ip, arp_name))
+        .await
+        .ok()
+        .flatten();
 
     Some(HostRow {
         ip: ip_s,
@@ -405,7 +414,7 @@ async fn ping(ip: Ipv4Addr, timeout: Duration) -> bool {
     .unwrap_or(false)
 }
 
-fn load_arp_table() -> HashMap<String, (String, String)> {
+fn load_arp_table() -> HashMap<String, ArpEntry> {
     let output = Command::new("arp").arg("-a").output();
     let Ok(output) = output else {
         return HashMap::new();
@@ -413,14 +422,38 @@ fn load_arp_table() -> HashMap<String, (String, String)> {
     let text = String::from_utf8_lossy(&output.stdout);
     let mut map = HashMap::new();
     for line in text.lines() {
-        if let Some((ip, mac, kind)) = parse_arp_line(line) {
-            map.insert(ip, (mac, kind));
+        if let Some((ip, entry)) = parse_arp_line(line) {
+            map.insert(ip, entry);
         }
     }
     map
 }
 
-fn parse_arp_line(line: &str) -> Option<(String, String, String)> {
+fn lookup_one_arp(ip: Ipv4Addr) -> Option<ArpEntry> {
+    let ip_s = ip.to_string();
+    let output = {
+        #[cfg(windows)]
+        {
+            Command::new("arp").args(["-a", &ip_s]).output()
+        }
+        #[cfg(unix)]
+        {
+            Command::new("arp").arg(&ip_s).output()
+        }
+    }
+    .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        if let Some((found, entry)) = parse_arp_line(line) {
+            if found == ip_s {
+                return Some(entry);
+            }
+        }
+    }
+    None
+}
+
+fn parse_arp_line(line: &str) -> Option<(String, ArpEntry)> {
     let lower = line.to_ascii_lowercase();
     if lower.contains("incomplete") {
         return None;
@@ -442,7 +475,132 @@ fn parse_arp_line(line: &str) -> Option<(String, String, String)> {
     } else {
         "dynamic"
     };
-    Some((ip, mac, kind.into()))
+    let name = line.find('(').and_then(|idx| {
+        let prefix = line[..idx].trim();
+        clean_hostname(prefix, &ip)
+    });
+    Some((
+        ip,
+        ArpEntry {
+            mac,
+            kind: kind.into(),
+            name,
+        },
+    ))
+}
+
+fn resolve_hostname(ip: Ipv4Addr, arp_name: Option<String>) -> Option<String> {
+    reverse_dns(ip)
+        .or(arp_name)
+        .or_else(|| mdns_ptr(ip))
+}
+
+fn reverse_dns(ip: Ipv4Addr) -> Option<String> {
+    let name = dns_lookup::lookup_addr(&IpAddr::V4(ip)).ok()?;
+    clean_hostname(&name, &ip.to_string())
+}
+
+fn clean_hostname(raw: &str, ip: &str) -> Option<String> {
+    let name = raw.trim().trim_end_matches('.').to_string();
+    if name.is_empty() || name == "?" || name == ip {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+fn mdns_ptr(ip: Ipv4Addr) -> Option<String> {
+    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
+    let _ = sock.set_multicast_ttl_v4(1);
+    let pkt = encode_ptr_query(ip);
+    sock.send_to(&pkt, "224.0.0.251:5353").ok()?;
+    let mut buf = [0u8; 1500];
+    let (n, _) = sock.recv_from(&mut buf).ok()?;
+    parse_ptr_answer(&buf[..n]).and_then(|n| clean_hostname(&n, &ip.to_string()))
+}
+
+fn encode_ptr_query(ip: Ipv4Addr) -> Vec<u8> {
+    let o = ip.octets();
+    let qname = format!("{}.{}.{}.{}.in-addr.arpa", o[3], o[2], o[1], o[0]);
+    let mut pkt = vec![0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0];
+    for label in qname.split('.') {
+        pkt.push(label.len() as u8);
+        pkt.extend(label.as_bytes());
+    }
+    pkt.push(0);
+    pkt.extend([0, 12, 0, 1]);
+    pkt
+}
+
+fn parse_ptr_answer(msg: &[u8]) -> Option<String> {
+    if msg.len() < 12 {
+        return None;
+    }
+    let qd = u16::from_be_bytes([msg[4], msg[5]]) as usize;
+    let an = u16::from_be_bytes([msg[6], msg[7]]) as usize;
+    let mut i = 12usize;
+    for _ in 0..qd {
+        let (_, next) = read_name(msg, i)?;
+        i = next.checked_add(4)?;
+    }
+    for _ in 0..an {
+        let (_, next) = read_name(msg, i)?;
+        i = next;
+        if i + 10 > msg.len() {
+            return None;
+        }
+        let rtype = u16::from_be_bytes([msg[i], msg[i + 1]]);
+        let rdlen = u16::from_be_bytes([msg[i + 8], msg[i + 9]]) as usize;
+        i += 10;
+        if rtype == 12 {
+            let (name, _) = read_name(msg, i)?;
+            return Some(name);
+        }
+        i = i.checked_add(rdlen)?;
+    }
+    None
+}
+
+fn read_name(msg: &[u8], mut i: usize) -> Option<(String, usize)> {
+    let mut labels = Vec::new();
+    let mut jumped = false;
+    let mut end = i;
+    let mut hops = 0;
+    loop {
+        if hops > 16 {
+            return None;
+        }
+        let len = *msg.get(i)? as usize;
+        if len == 0 {
+            i += 1;
+            if !jumped {
+                end = i;
+            }
+            break;
+        }
+        if len & 0xC0 == 0xC0 {
+            let ptr = ((len & 0x3F) << 8) | (*msg.get(i + 1)? as usize);
+            if !jumped {
+                end = i + 2;
+            }
+            i = ptr;
+            jumped = true;
+            hops += 1;
+            continue;
+        }
+        if len & 0xC0 != 0 {
+            return None;
+        }
+        i += 1;
+        let label = std::str::from_utf8(msg.get(i..i + len)?).ok()?;
+        labels.push(label.to_string());
+        i += len;
+        if !jumped {
+            end = i;
+        }
+    }
+    Some((labels.join("."), end))
 }
 
 fn known_service(port: u16) -> &'static str {
