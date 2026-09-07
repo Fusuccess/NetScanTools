@@ -34,10 +34,6 @@ export default function SettingsPage({
             }
             placeholder={COMMON_PORTS}
           />
-          <span>默认 ICMP</span>
-          <label><input type="checkbox" checked={form.defaultIcmp} onChange={(e) => setForm({ ...form, defaultIcmp: e.target.checked })} /> 勾选</label>
-          <span>默认 TCP 探活</span>
-          <label><input type="checkbox" checked={form.defaultTcp} onChange={(e) => setForm({ ...form, defaultTcp: e.target.checked })} /> 勾选</label>
         </div>
         <div className="modal-actions">
           <button

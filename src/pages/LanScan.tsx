@@ -14,8 +14,6 @@ type Props = {
 
 export default function LanScan({ nics, nic, onNic, settings, scanning, setScanning, onJumpPort }: Props) {
   const [range, setRange] = useState(nic?.cidrHint ?? "");
-  const [icmp, setIcmp] = useState(settings.defaultIcmp);
-  const [tcp, setTcp] = useState(settings.defaultTcp);
   const [showParams, setShowParams] = useState(false);
   const [timeoutMs, setTimeoutMs] = useState(settings.timeoutMs);
   const [concurrency, setConcurrency] = useState(settings.concurrency);
@@ -71,10 +69,10 @@ export default function LanScan({ nics, nic, onNic, settings, scanning, setScann
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [scanning, range, icmp, tcp, timeoutMs, concurrency]);
+  }, [scanning, range, timeoutMs, concurrency]);
 
   const pct = total ? Math.round((done / total) * 100) : 0;
-  const canStart = useMemo(() => !!range && (icmp || tcp) && !scanning, [range, icmp, tcp, scanning]);
+  const canStart = useMemo(() => !!range && !scanning, [range, scanning]);
 
   async function start() {
     setError("");
@@ -83,7 +81,7 @@ export default function LanScan({ nics, nic, onNic, settings, scanning, setScann
     setTotal(0);
     setScanning(true);
     try {
-      await api.startLanScan({ range, icmp, tcpProbe: tcp, timeoutMs, concurrency });
+      await api.startLanScan({ range, icmp: true, tcpProbe: false, timeoutMs, concurrency });
     } catch (e) {
       setScanning(false);
       setError(String(e));
@@ -121,16 +119,12 @@ export default function LanScan({ nics, nic, onNic, settings, scanning, setScann
           开始扫描 (Ctrl+R)
         </button>
       </div>
-      <div className="toolbar">
-        <label><input type="checkbox" checked={icmp} onChange={(e) => setIcmp(e.target.checked)} /> ICMP Ping</label>
-        <label><input type="checkbox" checked={tcp} onChange={(e) => setTcp(e.target.checked)} /> TCP 端口 (22,80,443,445,3389)</label>
-        {showParams && (
-          <>
-            <label className="field">超时(ms) <input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(Number(e.target.value))} /></label>
-            <label className="field">并发 <input type="number" value={concurrency} onChange={(e) => setConcurrency(Number(e.target.value))} /></label>
-          </>
-        )}
-      </div>
+      {showParams && (
+        <div className="toolbar">
+          <label className="field">超时(ms) <input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(Number(e.target.value))} /></label>
+          <label className="field">并发 <input type="number" value={concurrency} onChange={(e) => setConcurrency(Number(e.target.value))} /></label>
+        </div>
+      )}
       <div className="progress">
         <div className="bar"><i style={{ width: `${pct}%` }} /></div>
         <span>{pct}% ({done}/{total || 0})</span>
@@ -162,10 +156,6 @@ export default function LanScan({ nics, nic, onNic, settings, scanning, setScann
                   <td colSpan={6}>
                     <div className="detail">
                       详情: 响应延时 {h.rttMs ?? "-"}ms | ARP 状态: {h.arpKind ?? "-"}
-                      <br />
-                      开放基础端口: {h.probePorts.length
-                        ? h.probePorts.map((p) => `${p.port}${p.banner ? ` (${p.banner})` : ""}`).join(" | ")
-                        : "-"}
                     </div>
                   </td>
                 </tr>
