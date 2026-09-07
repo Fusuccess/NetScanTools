@@ -383,16 +383,21 @@ async fn grab_banner(ip: IpAddr, port: u16, timeout: Duration) -> Option<String>
 }
 
 fn sanitize(bytes: &[u8]) -> String {
-    let s = String::from_utf8_lossy(bytes);
-    s.chars()
-        .map(|c| if c.is_control() && c != ' ' { ' ' } else { c })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(180)
-        .collect()
+    let mut runs = Vec::new();
+    let mut cur = String::new();
+    for &b in bytes {
+        if (0x20..=0x7e).contains(&b) {
+            cur.push(b as char);
+        } else if cur.len() >= 3 {
+            runs.push(std::mem::take(&mut cur));
+        } else {
+            cur.clear();
+        }
+    }
+    if cur.len() >= 3 {
+        runs.push(cur);
+    }
+    runs.join(" ").chars().take(180).collect()
 }
 
 async fn ping(ip: Ipv4Addr, timeout: Duration) -> bool {

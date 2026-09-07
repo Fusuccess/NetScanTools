@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, watchScanFinished, watchScanPort, watchScanProgress } from "../lib/tauri";
 import { COMMON_PORTS, type PortRow, type Settings } from "../lib/types";
+
+type StatusFilter = "all" | "open" | "closed" | "timeout";
 
 type Props = {
   settings: Settings;
@@ -23,6 +25,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   const [timeoutN, setTimeoutN] = useState(0);
   const [error, setError] = useState("");
   const [finished, setFinished] = useState(false);
+  const [filter, setFilter] = useState<StatusFilter>("all");
 
   useEffect(() => {
     if (target) setIp(target);
@@ -71,6 +74,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
     setClosed(0);
     setTimeoutN(0);
     setFinished(false);
+    setFilter("all");
     setScanning(true);
     try {
       await api.startPortScan({ ip, ports: portsSpec(), timeoutMs, concurrency });
@@ -81,6 +85,10 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   }
 
   const status = scanning ? "扫描中" : finished ? "已完成" : "就绪";
+  const visible = useMemo(
+    () => (filter === "all" ? rows : rows.filter((r) => r.state === filter)),
+    [rows, filter],
+  );
 
   return (
     <div className="page">
@@ -113,9 +121,28 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
       )}
       {error && <div className="error">{error}</div>}
       <div className="stats">
-        扫描状态: {status} | 开放: {open} | 关闭: {closed} | 超时: {timeoutN}
+        扫描状态: {status}
         {total > 0 ? ` | 进度 ${done}/${total}` : ""}
         {preset === "1-65535" ? "（全端口仅列出开放项）" : ""}
+      </div>
+      <div className="toolbar">
+        结果筛选:
+        {(
+          [
+            ["all", "全部", rows.length],
+            ["open", "开放", open],
+            ["closed", "关闭", closed],
+            ["timeout", "超时", timeoutN],
+          ] as const
+        ).map(([id, label, count]) => (
+          <button
+            key={id}
+            className={`btn ${filter === id ? "primary" : ""}`}
+            onClick={() => setFilter(id)}
+          >
+            {label} ({count})
+          </button>
+        ))}
       </div>
       <table className="data">
         <thead>
@@ -124,7 +151,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {visible.map((r) => (
             <tr key={`${r.port}-${r.state}`}>
               <td>{r.port}</td>
               <td>{r.proto}</td>
