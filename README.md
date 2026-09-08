@@ -1,94 +1,131 @@
 # NetScanTools
 
-本机图形化网络工具，技术栈锁定为 **Tauri 2 + React + Rust**，打包为 macOS 与 Windows 桌面应用。
+本机图形化网络工具，技术栈为 **Tauri 2 + React + Rust**，可打包为 macOS 与 Windows 桌面应用。
 
-面向个人和运维自用：扫描自己有权限的网络，发现局域网设备、探测指定 IP 的端口、经跳板建立 SSH 隧道，以及把本机某个入口端口映射到目标地址。不做 Linux 安装包，不捆绑 nmap。不采用 Electron 或 Flutter。
+面向个人和运维自用：扫描自己有权限的网络，发现局域网设备、探测指定 IP 的端口、经跳板建立 SSH 本地转发。不做 Linux 安装包，不捆绑 nmap，不采用 Electron 或 Flutter。
 
-当前仓库已开始一期实现。界面以 `NetScanTools_UI_Prototype.md` 为准，实现以 `开发设计书.md` 为准；下文与代码不一致时以代码为准。
+界面以 [`NetScanTools_UI_Prototype.md`](NetScanTools_UI_Prototype.md) 为准，实现以 [`开发设计书.md`](开发设计书.md) 为准；与代码不一致时以代码为准。
 
-## 能做什么
+**请只在自己有权限的网络上使用。**
 
-四个功能彼此独立，共用同一个桌面壳。
+## 功能
 
-### 1. 局域网扫描（一期）
+四个入口共用同一个桌面壳。一期已实现前三项；本机端口映射仍是占位页。
 
-手动指定网段，列出在线设备。支持 CIDR（如 `192.168.1.0/24`）或起止 IP。扫描可看进度、可中途取消。
+### 局域网扫描
 
-在线判断固定用 ICMP Ping，界面不再提供探测方式选项。关 ICMP 的设备不会出现在列表里；端口开没开请用「端口扫描」。
+手动指定网段，列出在线设备。支持 CIDR（如 `192.168.1.0/24`）或起止 IP。可看进度、可中途取消。
+
+在线判断固定用 ICMP Ping。关 ICMP 的设备不会出现在列表里；端口开没开请用「端口扫描」。
 
 同网段在 ping 通后再读本机 ARP 表拿 MAC，并用 MAC 前缀对照厂商库。主机名按顺序尝试：反向 DNS → ARP 缓存里的名字 → 局域网组播 DNS（mDNS，如 `.local`）。很多摄像头、电视仍可能没有名字。
 
-### 2. 端口扫描（一期）
+换网络后点「刷新网卡」，顶栏 IP 和扫描网段会跟上当前网卡。结果表可点 IP / MAC 复制，也可「复制结果」。
 
-对单个 IP 做 TCP 全连接探测，不限局域网。端口范围可手填，并提供预设：
+### 端口扫描
 
-- 常用端口
-- `1–1024`
-- `1–65535`
+对单个 IP 做 TCP 全连接探测，不限局域网。预设：常用端口、`1–1024`、`1–65535`，或自定义。
 
-结果区分开放、关闭、超时，表格上方可按状态筛选，三种状态都会列入结果。对开放端口读取前若干字节作为横幅：SSH、HTTP 等文本协议直接显示；MySQL 等二进制握手只抽出可读的 ASCII 片段（例如版本号），避免乱码。默认不用半开扫描，普通用户权限即可运行。扫描 `1–65535` 时结果行数会很多，页面可能较慢。
+结果区分开放、关闭、超时，三种状态都会进表，可按状态筛选（默认看开放）。关闭是对端拒绝连接；防火墙丢包通常记为超时。开放端口会读前若干字节作横幅：SSH、HTTP 等文本协议直接显示；MySQL 等二进制握手只抽出可读 ASCII（例如版本号）。扫描 `1–65535` 时行数很多，页面可能较慢。
 
-### 3. SSH 隧道（一期，三期再扩展）
+### SSH 隧道
 
-对应命令行：
+对应：
 
 ```bash
 ssh -NfL 9999:192.168.100.50:8080 root@jump.example.com -p 2222
 ```
 
-图形表单填写本地端口、目标主机与端口、跳板地址/端口/用户。认证支持密码和私钥。流量经跳板加密。自己实现 SSH 协议，不调用系统 `ssh`，避免 Windows 没装 OpenSSH 时行为不一致。
+图形表单填写本地端口、目标主机与端口、跳板地址/端口/用户。认证支持密码和私钥。自己实现 SSH 协议，不调用系统 `ssh`。一期只做本地转发（`-L`），可多条、可启停；密码不写进磁盘。
 
-一期：本地转发（`-L`），可启动/停止，后台保持连接。  
-三期：远程转发（`-R`）、动态代理（`-D`）、断线重连。
+### 本机端口映射（尚未实现）
 
-### 4. 本机端口映射（四期）
+计划：在本机选定网卡 IP 上监听入口端口，转到目标 IP 和端口，不经过 SSH。一期仅保留页面位置。
 
-在本机选定网卡 IP 上监听入口端口，把进来的连接转到目标 IP 和端口。类似 `socat` 或 Windows 端口代理，**不经过 SSH、不加密**。
+## 环境要求
 
-入口 IP 从本机网卡列表里选：本机回环、某块局域网网卡、或全部网卡。可同时开多条规则，能看连接数和启停状态。
+- [Node.js](https://nodejs.org/)（建议当前 LTS）
+- [Rust](https://rustup.rs/)（`rustup` 默认工具链）
+- **macOS：** Xcode 命令行工具（`xcode-select --install`）
+- **Windows：** [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，勾选「使用 C++ 的桌面开发」
 
-SSH 隧道和本机端口映射不是同一件事：
+## 开发
 
-| | SSH 隧道 | 本机端口映射 |
-|---|---|---|
-| 路径 | 本机 → 跳板（加密登录）→ 目标 | 本机某个 IP:端口 → 直接转到目标 |
-| 适用 | 目标在另一张网，必须经堡垒机 | 目标本机已能直接访问，只是要把服务挂到指定网卡上 |
-| 分期 | 一期 | 四期 |
+```bash
+npm install
+npm run tauri dev
+```
 
-## 设备信息能拿到什么
+## 打包
 
-「尽可能扫出名称、型号」只能尽力而为，不能保证每台设备都有完整字段。手机、电脑、摄像头、路由器对外暴露的信息不一样。
+配置里会打出 macOS `.dmg` 和 Windows NSIS 安装程序（`*-setup.exe`）。**在哪个系统上打包，就打哪个系统的安装包**；macOS 不能直接打出可靠的 Windows 安装包（交叉编译仅作备选）。
 
-| 信息 | 典型来源 | 成功率 | 阶段 |
-|------|----------|--------|------|
-| 是否在线 | ICMP Ping | 高（关 ping 的设备会漏） | 一期 |
-| IP / 主机名 | 反向 DNS、ARP 名称、mDNS | 中（看设备是否报名字） | 一期 |
-| MAC / 网卡厂商 | 同网段 ARP + 厂商库 | 局域网高；跨网段无 | 一期 |
-| 开放端口与服务横幅 | TCP 连接 + 可读 ASCII 片段 | 中高 | 一期 |
-| 友好名称 / 型号增强 | UPnP、SNMP、设备网页 | 低到中，看设备 | 二期 |
-| 操作系统指纹 | 需更深探测或外部引擎 | 不稳定 | 不做默认能力 |
+先安装依赖：
 
-跨网段拿不到 MAC。IPv6 一期不做，先把 IPv4 做稳。
+```bash
+npm install
+```
 
-## 界面
+### macOS（Apple Silicon / M 芯片）
 
-左侧四个功能页：局域网扫描、端口扫描、SSH 隧道、本机端口映射。顶部显示当前任务状态（进行中 / 可取消）。
+```bash
+npm run tauri build -- --target aarch64-apple-darwin
+```
 
-- **局域网扫描：** 选网卡、填网段、开始/取消；结果含 IP、主机名、MAC、厂商。
-- **端口扫描：** 目标 IP、端口预设或自定义、结果表；可按开放/关闭/超时筛选。
-- **SSH 页：** 表单（本地端口、目标、跳板、用户、认证）+ 隧道列表（状态、停止、日志）。密码不落盘。
-- **映射页（四期）：** 入口 IP/端口、目标 IP/端口、规则列表、连接数（一期仅占位）。
+产物：`src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`
 
-## 技术栈（已锁定）
+### macOS（Intel）
+
+```bash
+rustup target add x86_64-apple-darwin
+npm run tauri build -- --target x86_64-apple-darwin
+```
+
+产物：`src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/`
+
+### macOS（一个包同时支持 Intel 和 M 芯片）
+
+体积大约是单架构的两倍：
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm run tauri build -- --target universal-apple-darwin
+```
+
+产物：`src-tauri/target/universal-apple-darwin/release/bundle/dmg/`
+
+### Windows
+
+在 Windows 上：
+
+```bash
+npm run tauri build
+```
+
+产物：`src-tauri/target/release/bundle/nsis/`
+
+没有 Windows 机器时，可在 macOS 上交叉编译 NSIS 包（官方当备选，不能签名）：
+
+```bash
+brew install nsis llvm
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+rustup target add x86_64-pc-windows-msvc
+cargo install --locked cargo-xwin
+npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc
+```
+
+产物：`src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`
+
+发给别人之前：macOS 未公证会提示无法验证开发者，需要 Apple 开发者账号做签名和公证。Windows 未签名时 SmartScreen / 杀毒软件可能拦截。
+
+## 技术栈
 
 | 层 | 技术 | 职责 |
 |----|------|------|
-| 界面 | Tauri 2 + React | 四个功能页、任务进度、结果表、表单 |
-| 本机 | Rust（`src-tauri`） | 主机发现、端口探测、SSH 隧道、端口映射、本地存储 |
+| 界面 | Tauri 2 + React | 功能页、进度、结果表、表单 |
+| 本机 | Rust（`src-tauri`） | 主机发现、端口探测、SSH 隧道、本地存储 |
 | 通信 | Tauri IPC | 界面发「开始 / 取消」，Rust 推送进度和结果 |
-| 打包 | Tauri 2 | macOS `.dmg` / `.app`，Windows `.exe` / `.msi` |
-
-目录约定（初始化工程后）：
+| 打包 | Tauri 2 | macOS `.dmg` / `.app`，Windows NSIS `setup.exe` |
 
 ```
 src/                 React 界面
@@ -101,83 +138,27 @@ src-tauri/           Rust 本机层
     store.rs         设置与隧道配置
 ```
 
-选这套是因为安装包小，扫描和长连接隧道适合放在 Rust，Mac / Windows 共用同一套本机逻辑。后续实现、依赖、目录都按此执行，不再评估 Electron 或 Flutter。
+不把 nmap 打进安装包。SSH 不调用系统 `ssh`。密码不落盘。
 
-不把 nmap 打进安装包：许可、体积、系统权限都会把打包变复杂。一期用 TCP 全连接即可回答「端口开没开」。若以后需要操作系统指纹，再做成「本机已安装 nmap 则可选增强」。
+## 设备信息能拿到什么
 
-SSH 自己用 Rust 实现协议，不调用系统 `ssh`。密码存系统钥匙串（二期），不写进明文配置。主机密钥要校验。
+| 信息 | 典型来源 | 说明 |
+|------|----------|------|
+| 是否在线 | ICMP Ping | 关 ping 的设备会漏 |
+| IP / 主机名 | 反向 DNS、ARP 名称、mDNS | 看设备是否报名字 |
+| MAC / 网卡厂商 | 同网段 ARP + 厂商库 | 跨网段没有 MAC |
+| 开放端口与服务横幅 | TCP 连接 + 可读 ASCII | 全连接，不需要管理员权限 |
 
-## 架构
+跨网段拿不到 MAC。IPv6 不做。UPnP / SNMP 型号、扫描导出、钥匙串存密码等见后续计划。
 
-```
-图形界面（React，四个功能页）
-        │
-        ▼
-命令通道（Tauri IPC：开始 / 取消 / 推送结果）
-        │
-        ├── 主机发现（网段扫描、设备画像）
-        ├── 端口探测（指定 IP 的 TCP 范围）
-        ├── SSH 隧道（经跳板加密转发）
-        ├── 本机端口映射（入口转到目标）
-        └── 本地存储（配置、历史、密钥引用）
-```
+## 后续计划
 
-## 交付计划
+- 二期：UPnP / SNMP 等型号信息、扫描历史与导出、系统钥匙串存密码
+- 三期：SSH `-R` / `-D`、断线重连
+- 四期：本机端口映射（入口 IP:端口转到目标，不经过 SSH）
 
-**一期（可发布最小版）**
+## 系统说明
 
-- 可打包的 Tauri 2 壳（Mac / Windows）
-- 网段主机表（ICMP 在线、IP、主机名、同网段 MAC/厂商）
-- 单 IP 的 TCP 端口扫描（可设范围、可取消、读横幅、按状态筛选）
-- SSH 本地转发（可多条；密码 + 私钥）
-
-**二期**
-
-- mDNS 已用于一期主机名；二期再补 UPnP / SNMP 等型号信息
-- 扫描历史与导出
-- 多条 SSH 隧道、系统钥匙串存密码
-
-**三期**
-
-- SSH 远程转发（`-R`）与动态代理（`-D`）
-- 断线重连
-- 扫描配置文件
-- 仅当本机有 nmap 时提供增强识别（可选）
-
-**四期**
-
-- 本机端口映射：选择入口 IP 和端口，转发到目标 IP 和端口
-- 多条规则、启停、连接数
-
-## 系统差异
-
-- **macOS：** 不要开 App Store 沙盒，否则局域网探测会被挡住。对外分发需要公证签名。监听 1024 以下端口通常需要提权。
-- **Windows：** 首次运行可能弹出防火墙询问。部分杀毒软件会把端口扫描报成风险软件，需要正规签名。
-- 只扫描自己有权限的网络。工具本身加并发上限和可取消，避免把网扫死。
-
-## 开发
-
-需要 Node.js 与 Rust（rustup）。
-
-```bash
-npm install
-npm run tauri dev
-```
-
-打包：
-
-```bash
-npm run tauri build
-```
-
-
-## 已确定的约定
-
-- 技术栈已锁定：Tauri 2 + React + Rust，不以其他框架实现
-- 局域网扫描固定 ICMP Ping，不在界面上选探测方式
-- SSH 一期只做本地转发（`-L`），可保存多条
-- 扫描引擎自研，不捆绑 nmap
-- SSH 认证：密码 + 私钥；密码不落盘
-- 暂不做 Linux
-- 本机端口映射放到四期
-- 仅用于有权限的网络
+- **macOS：** 不要开 App Store 沙盒，否则局域网探测会被挡住。监听 1024 以下端口通常需要提权。
+- **Windows：** 首次运行可能弹出防火墙询问。部分杀毒软件会把端口扫描报成风险软件。
+- 工具有并发上限，扫描可取消，避免把网扫死。
