@@ -23,7 +23,9 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
   const [modal, setModal] = useState<Partial<SshTunnel> | null>(null);
   const [password, setPassword] = useState("");
   const [askPass, setAskPass] = useState<SshTunnel | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<SshTunnel | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function reload() {
     const list = await api.listTunnels();
@@ -47,6 +49,7 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
 
   async function toggle(t: SshTunnel) {
     setError("");
+    setNotice("");
     try {
       if (t.status === "running") {
         await api.stopTunnel(t.id);
@@ -58,13 +61,20 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
       }
       await reload();
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      if (t.auth === "key" && msg.includes("私钥已加密")) {
+        setAskPass(t);
+        return;
+      }
+      setError(msg);
     }
   }
 
   async function save(start: boolean) {
     if (!modal) return;
     setError("");
+    setNotice("");
+    const running = isRunning(modal.id);
     try {
       const saved = await api.saveTunnel({
         id: modal.id || "",
@@ -80,21 +90,46 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
         targetPort: Number(modal.targetPort),
       });
       setModal(null);
-      if (start) {
-        if (modal.auth === "password") {
-          await api.startTunnel(saved.id || modal.id || "", password);
-        } else {
-          await api.startTunnel(saved.id || modal.id || "");
-        }
+      if (start && !running) {
+        await api.startTunnel(saved.id || modal.id || "", password || undefined);
       }
       setPassword("");
+      await reload();
+      if (running) setNotice("已保存。该隧道正在运行，需先停止再启动才会用新配置。");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function pickKey() {
+    if (!modal) return;
+    try {
+      const path = await api.pickSshKey();
+      if (path) setModal({ ...modal, keyPath: path });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function remove(t: SshTunnel) {
+    if (t.status === "running") return;
+    setError("");
+    setNotice("");
+    try {
+      await api.deleteTunnel(t.id);
+      setPendingDelete(null);
       await reload();
     } catch (e) {
       setError(String(e));
     }
   }
 
+  function isRunning(id?: string) {
+    return !!id && tunnels.some((t) => t.id === id && t.status === "running");
+  }
+
   const shownLogs = logs.filter((l) => !logId || l.id === logId);
+  const editingRunning = isRunning(modal?.id);
 
   return (
     <div className="page">
@@ -103,6 +138,7 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
         <button className="btn primary" onClick={() => { setModal(empty()); setPassword(""); }}>+ 新建隧道</button>
       </div>
       {error && <div className="error">{error}</div>}
+      {notice && <p className="hint">{notice}</p>}
       {tunnels.map((t) => (
         <div className="card" key={t.id}>
           <div className="toolbar" style={{ marginBottom: 4 }}>
@@ -111,7 +147,14 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
             {t.status === "running" && <span className="muted">已运行: {formatDur(t.uptimeSecs)}</span>}
             <button className="btn" onClick={() => toggle(t)}>{t.status === "running" ? "停止" : "启动"}</button>
             <button className="btn" onClick={() => setModal(t)}>编辑</button>
-            <button className="btn danger" onClick={async () => { await api.deleteTunnel(t.id); reload(); }}>删除</button>
+            <button
+              className="btn danger"
+              disabled={t.status === "running"}
+              title={t.status === "running" ? "请先停止再删除" : "删除"}
+              onClick={() => setPendingDelete(t)}
+            >
+              删除
+            </button>
             <button className="btn" onClick={() => setLogId(t.id)}>查看日志</button>
           </div>
           <div className="path">
@@ -131,7 +174,10 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
       {modal && (
         <div className="modal-back" onClick={() => setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>新建 SSH 本地转发 (-L)</h2>
+            <h2>{modal.id ? "编辑 SSH 本地转发 (-L)" : "新建 SSH 本地转发 (-L)"}</h2>
+            {editingRunning && (
+              <p className="hint">该隧道正在运行。保存后需先停止再启动，新配置才会生效。</p>
+            )}
             <div className="form-grid">
               <span>隧道别名</span>
               <input value={modal.alias ?? ""} onChange={(e) => setModal({ ...modal, alias: e.target.value })} />
@@ -156,8 +202,17 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
                 </>
               ) : (
                 <>
-                  <span>私钥路径</span>
-                  <input value={modal.keyPath ?? ""} onChange={(e) => setModal({ ...modal, keyPath: e.target.value })} />
+                  <span>私钥文件</span>
+                  <div className="file-row">
+                    <input
+                      value={modal.keyPath ?? ""}
+                      onChange={(e) => setModal({ ...modal, keyPath: e.target.value })}
+                      placeholder="选择或粘贴私钥路径"
+                    />
+                    <button type="button" className="btn" onClick={() => void pickKey()}>浏览…</button>
+                  </div>
+                  <span>私钥口令</span>
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="无口令可留空，不保存到磁盘" />
                 </>
               )}
               <span>目标主机 IP</span>
@@ -167,8 +222,28 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
             </div>
             <div className="modal-actions">
               <button className="btn" onClick={() => setModal(null)}>取消</button>
-              <button className="btn" onClick={() => save(false)}>保存</button>
-              <button className="btn primary" onClick={() => save(true)}>保存并启动</button>
+              <button className="btn" onClick={() => void save(false)}>保存</button>
+              <button
+                className="btn primary"
+                disabled={editingRunning}
+                title={editingRunning ? "正在运行，保存后需先停止再启动" : ""}
+                onClick={() => void save(true)}
+              >
+                保存并启动
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDelete && (
+        <div className="modal-back" onClick={() => setPendingDelete(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>删除隧道</h2>
+            <p>确定删除「{pendingDelete.alias}」？此操作不能恢复。</p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setPendingDelete(null)}>取消</button>
+              <button className="btn danger" onClick={() => void remove(pendingDelete)}>删除</button>
             </div>
           </div>
         </div>
@@ -177,7 +252,7 @@ export default function SshTunnels({ onRunningCount }: { onRunningCount: (n: num
       {askPass && (
         <div className="modal-back" onClick={() => setAskPass(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>输入密码以启动 {askPass.alias}</h2>
+            <h2>{askPass.auth === "key" ? `输入私钥口令以启动 ${askPass.alias}` : `输入密码以启动 ${askPass.alias}`}</h2>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
             <div className="modal-actions">
               <button className="btn" onClick={() => setAskPass(null)}>取消</button>

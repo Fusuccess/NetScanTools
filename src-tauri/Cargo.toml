@@ -21,8 +21,9 @@ tokio-util = "0.7"
 if-addrs = "0.13"
 ipnetwork = "0.21"
 dns-lookup = "2"
-        uuid = { version = "1", features = ["v4", "serde"] }
-        russh = "0.54"
+uuid = { version = "1", features = ["v4", "serde"] }
+russh = "0.54"
+rfd = "0.15"
 
 [profile.release]
 codegen-units = 1

@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 export const scanHotkey = /Mac/.test(navigator.platform) ? "⌘R" : "Ctrl+R";
 
 export async function copyText(text: string): Promise<boolean> {
@@ -23,11 +25,14 @@ export function portStateLabel(state: string) {
   return "超时";
 }
 
-export function downloadText(filename: string, text: string) {
-  const blob = new Blob([text], { type: "text/tab-separated-values;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
+export function exportFilename(kind: string, ip: string) {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const ts = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const host = (ip || "unknown").replace(/[<>:"/\\|?*]+/g, "-");
+  return `${kind}_${host}_${ts}.tsv`;
+}
+
+export async function downloadText(filename: string, text: string) {
+  await invoke("save_text_file", { filename, contents: text });
 }

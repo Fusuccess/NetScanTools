@@ -21,6 +21,7 @@ export const api = {
   }) => invoke<{ taskId: string }>("start_port_scan", { req }),
   cancelScan: () => invoke("cancel_scan"),
   listTunnels: () => invoke<SshTunnel[]>("list_tunnels"),
+  pickSshKey: () => invoke<string | null>("pick_ssh_key"),
   saveTunnel: (config: Partial<SshTunnel> & Record<string, unknown>) =>
     invoke<SshTunnel>("save_tunnel", { config }),
   startTunnel: (id: string, password?: string) =>

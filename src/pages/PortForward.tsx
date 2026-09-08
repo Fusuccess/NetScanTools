@@ -24,6 +24,7 @@ function bindLabel(ip: string, nics: Nic[]) {
 export default function PortForward({ nics }: { nics: Nic[] }) {
   const [rows, setRows] = useState<PortMap[]>([]);
   const [modal, setModal] = useState<Draft | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PortMap | null>(null);
   const [error, setError] = useState("");
 
   async function reload() {
@@ -114,15 +115,9 @@ export default function PortForward({ nics }: { nics: Nic[] }) {
                 {" "}
                 <button
                   className="btn danger"
-                  onClick={async () => {
-                    if (!window.confirm("确定删除这条映射？")) return;
-                    try {
-                      await api.deleteForward(r.id);
-                      await reload();
-                    } catch (e) {
-                      setError(String(e));
-                    }
-                  }}
+                  disabled={r.status === "running"}
+                  title={r.status === "running" ? "请先停止再删除" : "删除"}
+                  onClick={() => setPendingDelete(r)}
                 >
                   删除
                 </button>
@@ -161,6 +156,33 @@ export default function PortForward({ nics }: { nics: Nic[] }) {
               <button className="btn" onClick={() => setModal(null)}>取消</button>
               <button className="btn" onClick={() => void save(false)}>保存</button>
               <button className="btn primary" onClick={() => void save(true)}>保存并启动</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDelete && (
+        <div className="modal-back" onClick={() => setPendingDelete(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>删除映射</h2>
+            <p>确定删除 {pendingDelete.bindIp}:{pendingDelete.listenPort} 这条映射？</p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setPendingDelete(null)}>取消</button>
+              <button
+                className="btn danger"
+                onClick={async () => {
+                  setError("");
+                  try {
+                    await api.deleteForward(pendingDelete.id);
+                    setPendingDelete(null);
+                    await reload();
+                  } catch (e) {
+                    setError(String(e));
+                  }
+                }}
+              >
+                删除
+              </button>
             </div>
           </div>
         </div>

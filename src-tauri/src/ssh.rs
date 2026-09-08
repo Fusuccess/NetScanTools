@@ -1,9 +1,9 @@
 use crate::store::{self, SshTunnelConfig};
 use russh::client::{self, AuthResult};
-use russh::keys::{HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
+use russh::keys::{self, HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -109,11 +109,7 @@ async fn run_tunnel_inner(
     })?;
 
     let auth = if cfg.auth == "key" {
-        if cfg.key_path.trim().is_empty() {
-            return Err("未指定私钥文件".into());
-        }
-        let key = PrivateKey::read_openssh_file(Path::new(&cfg.key_path))
-            .map_err(|e| format!("读取私钥失败: {e}"))?;
+        let key = load_private_key(&cfg.key_path, password.as_deref())?;
         let hash = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
         handle
             .authenticate_publickey(
@@ -196,6 +192,23 @@ async fn run_tunnel_inner(
         }
     }
     Ok(())
+}
+
+pub fn load_private_key(path: &str, password: Option<&str>) -> Result<PrivateKey, String> {
+    if path.trim().is_empty() {
+        return Err("未指定私钥文件".into());
+    }
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("读取私钥失败: {e}"))?;
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+    let normalized = raw.lines().map(str::trim).collect::<Vec<_>>().join("\n");
+    let pass = password.filter(|s| !s.is_empty());
+    keys::decode_secret_key(&normalized, pass).map_err(|e| match e {
+        keys::Error::KeyIsEncrypted => "私钥已加密，请输入口令".into(),
+        keys::Error::CouldNotReadKey => {
+            "无法识别私钥格式，请用 OpenSSH 或 PEM 私钥文件（不要选 .pub）".into()
+        }
+        other => format!("读取私钥失败: {other}"),
+    })
 }
 
 fn log(app: &AppHandle, id: &str, level: &str, message: &str) {

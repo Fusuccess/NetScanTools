@@ -45,6 +45,44 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+fn ssh_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let p = PathBuf::from(home).join(".ssh");
+    p.is_dir().then_some(p)
+}
+
+#[tauri::command]
+async fn pick_ssh_key(app: AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let mut dlg = rfd::FileDialog::new().set_title("选择 SSH 私钥");
+        if let Some(dir) = ssh_dir() {
+            dlg = dlg.set_directory(dir);
+        }
+        let path = dlg.pick_file().map(|p| p.display().to_string());
+        let _ = tx.send(path);
+    })
+    .map_err(|e| e.to_string())?;
+    rx.await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_text_file(app: AppHandle, filename: String, contents: String) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let path = rfd::FileDialog::new()
+            .set_file_name(&filename)
+            .add_filter("表格", &["tsv", "txt"])
+            .save_file();
+        let _ = tx.send(path);
+    })
+    .map_err(|e| e.to_string())?;
+    let Some(path) = rx.await.map_err(|e| e.to_string())? else {
+        return Ok(());
+    };
+    std::fs::write(path, contents).map_err(|e| format!("保存失败: {e}"))
+}
+
 #[tauri::command]
 fn list_nics() -> Result<Vec<nic::Nic>, String> {
     nic::list_nics()
@@ -189,6 +227,9 @@ async fn start_tunnel(
         .into_iter()
         .find(|t| t.id == arg.id)
         .ok_or_else(|| "找不到隧道配置".to_string())?;
+    if cfg.auth == "key" {
+        ssh::load_private_key(&cfg.key_path, arg.password.as_deref())?;
+    }
     {
         let mut map = state.tunnels.lock().map_err(|e| e.to_string())?;
         if map.contains_key(&cfg.id) {
@@ -450,6 +491,8 @@ pub fn run() {
             start_port_scan,
             cancel_scan,
             list_tunnels,
+            pick_ssh_key,
+            save_text_file,
             save_tunnel,
             start_tunnel,
             stop_tunnel,

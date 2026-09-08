@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { copyText, downloadText, scanHotkey } from "../lib/copy";
+import { copyText, downloadText, exportFilename, scanHotkey } from "../lib/copy";
 import { api, watchScanFinished, watchScanHost, watchScanProgress } from "../lib/tauri";
 import type { HostRow, Nic, Settings } from "../lib/types";
 
@@ -72,22 +72,24 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
     return () => off.forEach((u) => u());
   }, [setScanning]);
 
+  const rangeIssue = useMemo(() => netRangeIssue(range), [range]);
+  const canStart = !scanning && !rangeIssue;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+
   useEffect(() => {
     if (!active) return;
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
         e.preventDefault();
-        if (!scanning) void start();
+        if (canStart) void start();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, scanning, range, timeoutMs, concurrency]);
-
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  const canStart = useMemo(() => !!range && !scanning, [range, scanning]);
+  }, [active, canStart, range, timeoutMs, concurrency]);
 
   async function start() {
+    if (rangeIssue) return;
     setError("");
     setHosts([]);
     setDone(0);
@@ -119,10 +121,14 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
     await copyValue([header, ...lines].join("\n"), "已复制结果");
   }
 
-  function exportResults() {
+  async function exportResults() {
     const header = ["IP", "主机名", "MAC", "厂商"].join("\t");
     const lines = hosts.map((h) => [h.ip, h.hostname || "", h.mac || "", h.vendor || ""].join("\t"));
-    downloadText("lan-scan.tsv", [header, ...lines].join("\n"));
+    try {
+      await downloadText(exportFilename("lan-scan", nic?.ipv4 ?? range), [header, ...lines].join("\n"));
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   const emptyHint = owned
@@ -154,15 +160,21 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
         </button>
         <label className="field grow">
           网段:
-          <input value={range} onChange={(e) => setRange(e.target.value)} />
+          <input
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+            aria-invalid={!!rangeIssue}
+            title={rangeIssue ?? ""}
+          />
         </label>
         <button className="btn" onClick={() => setShowParams((v) => !v)}>
           探测参数
         </button>
-        <button className="btn primary" disabled={!canStart} onClick={start}>
+        <button className="btn primary" disabled={!canStart} onClick={start} title={rangeIssue ?? ""}>
           开始扫描 ({scanHotkey})
         </button>
       </div>
+      {rangeIssue && !scanning && <p className="hint">{rangeIssue}</p>}
       {showParams && (
         <div className="toolbar">
           <label className="field">超时(ms) <input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(Number(e.target.value))} /></label>
@@ -178,7 +190,7 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
       <div className="stats">
         在线设备: {hosts.length} 台 | 耗时: {elapsed.toFixed(1)}s
         <button className="btn" disabled={!hosts.length} onClick={() => void copyResults()}>复制结果</button>
-        <button className="btn" disabled={!hosts.length} onClick={exportResults}>导出</button>
+        <button className="btn" disabled={!hosts.length} onClick={() => void exportResults()}>导出</button>
         {copied && <span>{copied}</span>}
       </div>
       <div className="table-wrap">
@@ -228,4 +240,39 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
       </div>
     </div>
   );
+}
+
+function parseIpv4(s: string): number | null {
+  const parts = s.trim().split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const v = Number(p);
+    if (v > 255) return null;
+    n = (n << 8) + v;
+  }
+  return n >>> 0;
+}
+
+function netRangeIssue(range: string): string | null {
+  const r = range.trim();
+  if (!r) return "请填写网段";
+  if (r.includes("-") && !r.includes("/")) {
+    const parts = r.split("-");
+    if (parts.length !== 2) return "网段格式无效，请用 CIDR 或起止 IP";
+    const start = parseIpv4(parts[0]);
+    const end = parseIpv4(parts[1]);
+    if (start == null) return "起始 IP 无效";
+    if (end == null) return "结束 IP 无效";
+    if (end < start) return "结束 IP 不能小于起始 IP";
+    if (end - start > 65_536) return "范围过大";
+    return null;
+  }
+  const slash = r.lastIndexOf("/");
+  if (slash < 0) return "网段格式无效，请用 CIDR（如 192.168.1.0/24）或起止 IP";
+  if (parseIpv4(r.slice(0, slash)) == null) return "网段格式无效，请用 CIDR 或起止 IP";
+  const prefix = Number(r.slice(slash + 1));
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return "掩码位数须为 0–32";
+  return null;
 }
