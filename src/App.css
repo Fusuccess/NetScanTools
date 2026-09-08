@@ -56,12 +56,16 @@ button { cursor: pointer; }
   border-bottom: 1px solid var(--line);
 }
 .brand { font-weight: 700; letter-spacing: 0.02em; }
-.top-meta { display: flex; gap: 10px; color: var(--muted); }
+.top-meta { display: flex; align-items: center; gap: 10px; color: var(--muted); }
 .top-meta span {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 3px 10px;
   background: var(--bg);
+}
+.top-meta .btn {
+  padding: 3px 10px;
+  border-radius: 999px;
 }
 
 .shell { display: grid; grid-template-columns: 168px 1fr; min-height: 0; }

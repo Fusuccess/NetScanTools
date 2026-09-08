@@ -6,13 +6,15 @@ type Props = {
   nics: Nic[];
   nic: Nic | null;
   onNic: (n: Nic) => void;
+  onRefreshNics: () => void;
+  nicsBusy: boolean;
   settings: Settings;
   scanning: boolean;
   setScanning: (v: boolean) => void;
   onJumpPort: (ip: string) => void;
 };
 
-export default function LanScan({ nics, nic, onNic, settings, scanning, setScanning, onJumpPort }: Props) {
+export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, settings, scanning, setScanning, onJumpPort }: Props) {
   const [range, setRange] = useState(nic?.cidrHint ?? "");
   const [showParams, setShowParams] = useState(false);
   const [timeoutMs, setTimeoutMs] = useState(settings.timeoutMs);
@@ -108,6 +110,9 @@ export default function LanScan({ nics, nic, onNic, settings, scanning, setScann
             ))}
           </select>
         </label>
+        <button className="btn" disabled={nicsBusy} onClick={() => void onRefreshNics()}>
+          {nicsBusy ? "刷新中" : "刷新网卡"}
+        </button>
         <label className="field grow">
           网段:
           <input value={range} onChange={(e) => setRange(e.target.value)} />

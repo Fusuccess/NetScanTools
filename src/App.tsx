@@ -19,13 +19,33 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [tunnelCount, setTunnelCount] = useState(0);
   const [portTarget, setPortTarget] = useState("");
+  const [nicsBusy, setNicsBusy] = useState(false);
+
+  function pickNic(list: Nic[], cur: Nic | null) {
+    if (cur) {
+      const same = list.find((n) => n.name === cur.name && n.ipv4 === cur.ipv4);
+      if (same) return same;
+      const byName = list.find((n) => n.name === cur.name && !n.ipv4.startsWith("127."));
+      if (byName) return byName;
+    }
+    return list.find((n) => !n.ipv4.startsWith("127.")) ?? list[0] ?? null;
+  }
+
+  async function refreshNics() {
+    setNicsBusy(true);
+    try {
+      const list = await api.listNics();
+      setNics(list);
+      setNic((cur) => pickNic(list, cur));
+    } catch {
+      // keep current list
+    } finally {
+      setNicsBusy(false);
+    }
+  }
 
   useEffect(() => {
-    api.listNics().then((list) => {
-      setNics(list);
-      const pick = list.find((n) => !n.ipv4.startsWith("127.")) ?? list[0] ?? null;
-      setNic(pick);
-    }).catch(() => {});
+    void refreshNics();
     api.getSettings().then(setSettings).catch(() => {});
   }, []);
 
@@ -59,6 +79,9 @@ export default function App() {
           <span>
             {nic ? `${nic.name}: ${nic.ipv4}` : "无网卡"}
           </span>
+          <button className="btn" disabled={nicsBusy} onClick={() => void refreshNics()}>
+            {nicsBusy ? "刷新中" : "刷新网卡"}
+          </button>
           <span>状态: {status}</span>
         </div>
       </header>
@@ -84,6 +107,8 @@ export default function App() {
               nics={nics}
               nic={nic}
               onNic={setNic}
+              onRefreshNics={refreshNics}
+              nicsBusy={nicsBusy}
               settings={settings}
               scanning={scanning}
               setScanning={setScanning}
