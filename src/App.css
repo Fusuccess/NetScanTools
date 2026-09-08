@@ -68,7 +68,7 @@ button { cursor: pointer; }
   border-radius: 999px;
 }
 
-.shell { display: grid; grid-template-columns: 168px 1fr; min-height: 0; }
+.shell { display: grid; grid-template-columns: 168px 1fr; min-height: 0; height: 100%; }
 
 .sidebar {
   background: var(--sidebar);
@@ -90,9 +90,35 @@ button { cursor: pointer; }
 .sidebar .spacer { flex: 1; }
 .side-sep { height: 1px; background: #374151; margin: 8px 6px; }
 
-.main { min-width: 0; overflow: auto; padding: 14px; }
+.main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+}
 
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.page.page-fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.page.page-fill > :not(.table-wrap) { flex-shrink: 0; }
 .page h1 { margin: 0 0 12px; font-size: 18px; }
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.table-wrap table.data { border: 0; }
 .toolbar, .row {
   display: flex;
   flex-wrap: wrap;
@@ -136,11 +162,19 @@ button { cursor: pointer; }
 }
 .bar > i { display: block; height: 100%; background: var(--accent); }
 
-.stats { color: var(--muted); margin-bottom: 8px; }
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
 
 table.data {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--panel);
   border: 1px solid var(--line);
 }
@@ -150,7 +184,21 @@ table.data th, table.data td {
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
-table.data th { background: var(--table-head); font-weight: 600; }
+table.data th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--table-head);
+  font-weight: 600;
+}
+table.data td.placeholder {
+  text-align: center;
+  color: var(--muted);
+  padding: 40px 8px;
+  border-bottom: 0;
+}
+.copyable { cursor: pointer; }
+.copyable:hover { text-decoration: underline; }
 .dot { color: var(--ok); }
 .dot.off { color: var(--muted); }
 .dot.bad { color: var(--bad); }

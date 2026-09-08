@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { copyText, portStateLabel } from "../lib/copy";
 import { api, watchScanFinished, watchScanPort, watchScanProgress } from "../lib/tauri";
 import { COMMON_PORTS, type PortRow, type Settings } from "../lib/types";
 
@@ -26,6 +27,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   const [error, setError] = useState("");
   const [finished, setFinished] = useState(false);
   const [filter, setFilter] = useState<StatusFilter>("open");
+  const [copied, setCopied] = useState("");
 
   useEffect(() => {
     if (target) setIp(target);
@@ -100,8 +102,34 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
     [rows],
   );
 
+  async function copyValue(text: string, label: string) {
+    if (!text) return;
+    if (await copyText(text)) {
+      setCopied(label);
+      window.setTimeout(() => setCopied(""), 1500);
+    }
+  }
+
+  async function copyResults() {
+    const header = ["端口", "协议", "状态", "服务", "横幅"].join("\t");
+    const lines = visible.map((r) =>
+      [r.port, r.proto, portStateLabel(r.state), r.service || "", r.banner || ""].join("\t"),
+    );
+    await copyValue([header, ...lines].join("\n"), "已复制结果");
+  }
+
+  function emptyHint() {
+    if (scanning && rows.length === 0) return "扫描中，结果会陆续出现。";
+    if (scanning) return "当前筛选还没有匹配项，扫描仍在进行。";
+    if (rows.length === 0) return "还没有扫描结果。填写目标 IP 后点「开始扫描」。";
+    if (filter === "open") return "没有开放端口。可改看「全部」或「超时」。";
+    if (filter === "closed") return "没有关闭的端口。无响应会记为超时。";
+    if (filter === "timeout") return "没有超时的端口。";
+    return "当前筛选没有匹配的端口。";
+  }
+
   return (
-    <div className="page">
+    <div className="page page-fill">
       <h1>端口扫描</h1>
       <div className="toolbar">
         <label className="field grow">
@@ -137,6 +165,8 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
       <div className="stats">
         扫描状态: {status}
         {` | 开放 ${open} / 关闭 ${closed} / 超时 ${timeoutN}`}
+        <button className="btn" disabled={!visible.length} onClick={() => void copyResults()}>复制结果</button>
+        {copied && <span>{copied}</span>}
       </div>
       <div className="toolbar">
         结果筛选:
@@ -158,26 +188,39 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
         ))}
       </div>
       <p className="muted">关闭是对端拒绝连接；无响应会记为超时，请看「超时」而不是「关闭」。</p>
-      <table className="data">
-        <thead>
-          <tr>
-            <th>端口</th><th>协议</th><th>状态</th><th>Known Service</th><th>Banner 探针响应</th>
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((r) => (
-            <tr key={`${r.port}-${r.state}`}>
-              <td>{r.port}</td>
-              <td>{r.proto}</td>
-              <td className={r.state === "open" ? "dot" : "dot bad"}>
-                {r.state === "open" ? "OPEN" : r.state === "closed" ? "CLOSED" : "TIMEOUT"}
-              </td>
-              <td>{r.service || "-"}</td>
-              <td>{r.banner || "-"}</td>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>端口</th><th>协议</th><th>状态</th><th>服务</th><th>横幅</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visible.length === 0 && (
+              <tr>
+                <td className="placeholder" colSpan={5}>{emptyHint()}</td>
+              </tr>
+            )}
+            {visible.map((r) => (
+              <tr key={`${r.port}-${r.state}`}>
+                <td>
+                  <span className="copyable" title="点击复制" onClick={() => void copyValue(String(r.port), "已复制端口")}>{r.port}</span>
+                </td>
+                <td>{r.proto}</td>
+                <td className={r.state === "open" ? "dot" : "dot bad"}>
+                  {portStateLabel(r.state)}
+                </td>
+                <td>{r.service || "-"}</td>
+                <td>
+                  {r.banner ? (
+                    <span className="copyable" title="点击复制" onClick={() => void copyValue(r.banner, "已复制横幅")}>{r.banner}</span>
+                  ) : "-"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
