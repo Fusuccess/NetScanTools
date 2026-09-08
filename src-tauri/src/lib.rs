@@ -3,13 +3,16 @@ mod oui;
 mod scanner;
 mod ssh;
 mod store;
+mod forward;
 
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
-use store::SshTunnelConfig;
+use store::{ForwardConfig, SshTunnelConfig};
 use tauri::{AppHandle, Manager, State};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -24,10 +27,16 @@ struct ScanSlot {
     cancel: CancellationToken,
 }
 
+struct ForwardRuntime {
+    cancel: CancellationToken,
+    connections: Arc<AtomicUsize>,
+}
+
 #[derive(Default)]
 struct AppState {
     scan: Mutex<Option<ScanSlot>>,
     tunnels: Mutex<HashMap<String, TunnelRuntime>>,
+    forwards: Mutex<HashMap<String, ForwardRuntime>>,
 }
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -240,6 +249,109 @@ fn delete_tunnel(app: AppHandle, state: State<AppState>, arg: IdArg) -> Result<(
     store::save_tunnels(&dir, &tunnels)
 }
 
+#[tauri::command]
+fn list_forwards(app: AppHandle, state: State<AppState>) -> Result<Vec<forward::ForwardView>, String> {
+    forward_views(&app, &state)
+}
+
+#[tauri::command]
+fn save_forward(app: AppHandle, mut config: ForwardConfig) -> Result<ForwardConfig, String> {
+    if config.bind_ip.trim().is_empty() {
+        return Err("请选择入口绑定地址".into());
+    }
+    if config.listen_port == 0 {
+        return Err("入口端口无效".into());
+    }
+    if config.target_host.trim().is_empty() {
+        return Err("请填写目标地址".into());
+    }
+    if config.target_port == 0 {
+        return Err("目标端口无效".into());
+    }
+    if config.id.is_empty() {
+        config.id = Uuid::new_v4().to_string();
+    }
+    let dir = data_dir(&app)?;
+    let mut list = store::load_forwards(&dir);
+    if let Some(existing) = list.iter_mut().find(|t| t.id == config.id) {
+        *existing = config.clone();
+    } else {
+        list.push(config.clone());
+    }
+    store::save_forwards(&dir, &list)?;
+    Ok(config)
+}
+
+#[tauri::command]
+async fn start_forward(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    arg: IdArg,
+) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    let cfg = store::load_forwards(&dir)
+        .into_iter()
+        .find(|t| t.id == arg.id)
+        .ok_or_else(|| "找不到映射配置".to_string())?;
+    {
+        let mut map = state.forwards.lock().map_err(|e| e.to_string())?;
+        if map.contains_key(&cfg.id) {
+            return Err("映射已在运行".into());
+        }
+        let cancel = CancellationToken::new();
+        let connections = Arc::new(AtomicUsize::new(0));
+        map.insert(
+            cfg.id.clone(),
+            ForwardRuntime {
+                cancel: cancel.clone(),
+                connections: connections.clone(),
+            },
+        );
+        let app2 = app.clone();
+        let id = cfg.id.clone();
+        tokio::spawn(async move {
+            forward::run_forward(app2.clone(), cfg, connections, cancel).await;
+            if let Some(state) = app2.try_state::<AppState>() {
+                if let Ok(mut map) = state.forwards.lock() {
+                    map.remove(&id);
+                }
+            }
+        });
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_forward(state: State<AppState>, arg: IdArg) -> Result<(), String> {
+    if let Some(rt) = state
+        .forwards
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&arg.id)
+    {
+        rt.cancel.cancel();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_forward(app: AppHandle, state: State<AppState>, arg: IdArg) -> Result<(), String> {
+    if state
+        .forwards
+        .lock()
+        .map_err(|e| e.to_string())?
+        .contains_key(&arg.id)
+    {
+        return Err("请先停止映射再删除".into());
+    }
+    let dir = data_dir(&app)?;
+    let list: Vec<_> = store::load_forwards(&dir)
+        .into_iter()
+        .filter(|t| t.id != arg.id)
+        .collect();
+    store::save_forwards(&dir, &list)
+}
+
 fn take_scan_slot(state: &AppState, task_id: &str) -> Result<CancellationToken, String> {
     let mut slot = state.scan.lock().map_err(|e| e.to_string())?;
     if slot.as_ref().is_some_and(|s| !s.cancel.is_cancelled()) {
@@ -284,6 +396,29 @@ fn views(app: &AppHandle, state: &AppState) -> Result<Vec<ssh::SshTunnelView>, S
         .collect())
 }
 
+fn forward_views(app: &AppHandle, state: &AppState) -> Result<Vec<forward::ForwardView>, String> {
+    let dir = data_dir(app)?;
+    let running = state.forwards.lock().map_err(|e| e.to_string())?;
+    Ok(store::load_forwards(&dir)
+        .into_iter()
+        .map(|config| {
+            let rt = running.get(&config.id);
+            forward::ForwardView {
+                status: if rt.is_some() {
+                    "running".into()
+                } else {
+                    "stopped".into()
+                },
+                connections: rt
+                    .map(|r| r.connections.load(Ordering::Relaxed) as u32)
+                    .unwrap_or(0),
+                last_error: None,
+                config,
+            }
+        })
+        .collect())
+}
+
 #[tauri::command]
 fn open_author_site() -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -319,6 +454,11 @@ pub fn run() {
             start_tunnel,
             stop_tunnel,
             delete_tunnel,
+            list_forwards,
+            save_forward,
+            start_forward,
+            stop_forward,
+            delete_forward,
             open_author_site
         ])
         .run(tauri::generate_context!())

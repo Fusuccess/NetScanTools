@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { HostRow, Nic, PortRow, ScanProgress, Settings, SshLog, SshTunnel } from "./types";
+import type { HostRow, Nic, PortMap, PortRow, ScanProgress, Settings, SshLog, SshTunnel } from "./types";
 
 export const api = {
   listNics: () => invoke<Nic[]>("list_nics"),
@@ -27,6 +27,12 @@ export const api = {
     invoke("start_tunnel", { arg: { id, password } }),
   stopTunnel: (id: string) => invoke("stop_tunnel", { arg: { id } }),
   deleteTunnel: (id: string) => invoke("delete_tunnel", { arg: { id } }),
+  listForwards: () => invoke<PortMap[]>("list_forwards"),
+  saveForward: (config: Partial<PortMap> & Record<string, unknown>) =>
+    invoke<PortMap>("save_forward", { config }),
+  startForward: (id: string) => invoke("start_forward", { arg: { id } }),
+  stopForward: (id: string) => invoke("stop_forward", { arg: { id } }),
+  deleteForward: (id: string) => invoke("delete_forward", { arg: { id } }),
   openAuthorSite: () => invoke("open_author_site"),
 };
 
@@ -53,3 +59,5 @@ export const watchScanFinished = (cb: (p: { taskId: string; error?: string | nul
 export const watchSshLog = (cb: (l: SshLog) => void) => watch("ssh:log", cb);
 export const watchSshStatus = (cb: (p: { id: string; status: string; lastError?: string | null }) => void) =>
   watch("ssh:status", cb);
+export const watchForwardStatus = (cb: (p: { id: string; status: string; connections?: number; lastError?: string | null }) => void) =>
+  watch("forward:status", cb);

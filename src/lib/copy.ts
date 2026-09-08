@@ -22,3 +22,12 @@ export function portStateLabel(state: string) {
   if (state === "closed") return "关闭";
   return "超时";
 }
+
+export function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: "text/tab-separated-values;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}

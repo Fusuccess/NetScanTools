@@ -134,7 +134,7 @@ export default function App() {
             </div>
           )}
           {page === "ssh" && <SshTunnels onRunningCount={setTunnelCount} />}
-          {page === "fwd" && <PortForward />}
+          {page === "fwd" && <PortForward nics={nics} />}
           {page === "settings" && settings && (
             <SettingsPage settings={settings} onSave={saveSettings} />
           )}

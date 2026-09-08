@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { copyText, portStateLabel } from "../lib/copy";
+import { copyText, downloadText, portStateLabel } from "../lib/copy";
 import { api, watchScanFinished, watchScanPort, watchScanProgress } from "../lib/tauri";
 import { COMMON_PORTS, type PortRow, type Settings } from "../lib/types";
 
@@ -129,6 +129,14 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
     await copyValue([header, ...lines].join("\n"), "已复制结果");
   }
 
+  function exportResults() {
+    const header = ["端口", "协议", "状态", "服务", "横幅"].join("\t");
+    const lines = visible.map((r) =>
+      [r.port, r.proto, portStateLabel(r.state), r.service || "", r.banner || ""].join("\t"),
+    );
+    downloadText("port-scan.tsv", [header, ...lines].join("\n"));
+  }
+
   function emptyHint() {
     if (owned && rows.length === 0) return "扫描中，结果会陆续出现。";
     if (owned) return "当前筛选还没有匹配项，扫描仍在进行。";
@@ -177,6 +185,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
         扫描状态: {status}
         {` | 开放 ${open} / 关闭 ${closed} / 超时 ${timeoutN}`}
         <button className="btn" disabled={!visible.length} onClick={() => void copyResults()}>复制结果</button>
+        <button className="btn" disabled={!visible.length} onClick={exportResults}>导出</button>
         {copied && <span>{copied}</span>}
       </div>
       <div className="toolbar">

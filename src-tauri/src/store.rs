@@ -61,6 +61,24 @@ pub fn save_tunnels(dir: &Path, tunnels: &[SshTunnelConfig]) -> Result<(), Strin
     write_json(&dir.join("tunnels.json"), tunnels)
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardConfig {
+    pub id: String,
+    pub bind_ip: String,
+    pub listen_port: u16,
+    pub target_host: String,
+    pub target_port: u16,
+}
+
+pub fn load_forwards(dir: &Path) -> Vec<ForwardConfig> {
+    read_json(&dir.join("forwards.json")).unwrap_or_default()
+}
+
+pub fn save_forwards(dir: &Path, forwards: &[ForwardConfig]) -> Result<(), String> {
+    write_json(&dir.join("forwards.json"), forwards)
+}
+
 pub fn known_hosts_path(dir: &Path) -> PathBuf {
     dir.join("known_hosts.json")
 }

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { copyText, scanHotkey } from "../lib/copy";
+import { copyText, downloadText, scanHotkey } from "../lib/copy";
 import { api, watchScanFinished, watchScanHost, watchScanProgress } from "../lib/tauri";
 import type { HostRow, Nic, Settings } from "../lib/types";
 
@@ -119,6 +119,12 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
     await copyValue([header, ...lines].join("\n"), "已复制结果");
   }
 
+  function exportResults() {
+    const header = ["IP", "主机名", "MAC", "厂商"].join("\t");
+    const lines = hosts.map((h) => [h.ip, h.hostname || "", h.mac || "", h.vendor || ""].join("\t"));
+    downloadText("lan-scan.tsv", [header, ...lines].join("\n"));
+  }
+
   const emptyHint = owned
     ? "扫描中，在线设备会陆续出现。"
     : "还没有扫描结果。选择网段后点「开始扫描」。";
@@ -172,6 +178,7 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
       <div className="stats">
         在线设备: {hosts.length} 台 | 耗时: {elapsed.toFixed(1)}s
         <button className="btn" disabled={!hosts.length} onClick={() => void copyResults()}>复制结果</button>
+        <button className="btn" disabled={!hosts.length} onClick={exportResults}>导出</button>
         {copied && <span>{copied}</span>}
       </div>
       <div className="table-wrap">
