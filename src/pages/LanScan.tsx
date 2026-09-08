@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { copyText, scanHotkey } from "../lib/copy";
 import { api, watchScanFinished, watchScanHost, watchScanProgress } from "../lib/tauri";
 import type { HostRow, Nic, Settings } from "../lib/types";
@@ -10,12 +10,13 @@ type Props = {
   onRefreshNics: () => void;
   nicsBusy: boolean;
   settings: Settings;
+  active: boolean;
   scanning: boolean;
   setScanning: (v: boolean) => void;
   onJumpPort: (ip: string) => void;
 };
 
-export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, settings, scanning, setScanning, onJumpPort }: Props) {
+export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, settings, active, scanning, setScanning, onJumpPort }: Props) {
   const [range, setRange] = useState(nic?.cidrHint ?? "");
   const [showParams, setShowParams] = useState(false);
   const [timeoutMs, setTimeoutMs] = useState(settings.timeoutMs);
@@ -27,6 +28,8 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
   const [error, setError] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [copied, setCopied] = useState("");
+  const [owned, setOwned] = useState(false);
+  const ownedRef = useRef(false);
 
   useEffect(() => {
     if (nic && !scanning) setRange(nic.cidrHint);
@@ -34,29 +37,34 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
 
   useEffect(() => {
     let t: number | undefined;
-    if (scanning) {
+    if (owned && scanning) {
       const start = Date.now();
       t = window.setInterval(() => setElapsed((Date.now() - start) / 1000), 200);
     }
     return () => clearInterval(t);
-  }, [scanning]);
+  }, [owned, scanning]);
 
   useEffect(() => {
     const off = [
       watchScanProgress((p) => {
+        if (!ownedRef.current) return;
         setDone(p.done);
         setTotal(p.total);
       }),
-      watchScanHost((h) =>
+      watchScanHost((h) => {
+        if (!ownedRef.current) return;
         setHosts((prev) => {
           const i = prev.findIndex((x) => x.ip === h.ip);
           if (i < 0) return [...prev, h];
           const next = [...prev];
           next[i] = h;
           return next;
-        }),
-      ),
+        });
+      }),
       watchScanFinished((p) => {
+        if (!ownedRef.current) return;
+        ownedRef.current = false;
+        setOwned(false);
         setScanning(false);
         if (p.error) setError(p.error);
       }),
@@ -65,6 +73,7 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
   }, [setScanning]);
 
   useEffect(() => {
+    if (!active) return;
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
         e.preventDefault();
@@ -73,7 +82,7 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [scanning, range, timeoutMs, concurrency]);
+  }, [active, scanning, range, timeoutMs, concurrency]);
 
   const pct = total ? Math.round((done / total) * 100) : 0;
   const canStart = useMemo(() => !!range && !scanning, [range, scanning]);
@@ -83,10 +92,14 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
     setHosts([]);
     setDone(0);
     setTotal(0);
+    ownedRef.current = true;
+    setOwned(true);
     setScanning(true);
     try {
       await api.startLanScan({ range, icmp: true, tcpProbe: false, timeoutMs, concurrency });
     } catch (e) {
+      ownedRef.current = false;
+      setOwned(false);
       setScanning(false);
       setError(String(e));
     }
@@ -106,7 +119,7 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
     await copyValue([header, ...lines].join("\n"), "已复制结果");
   }
 
-  const emptyHint = scanning
+  const emptyHint = owned
     ? "扫描中，在线设备会陆续出现。"
     : "还没有扫描结果。选择网段后点「开始扫描」。";
 
@@ -153,7 +166,7 @@ export default function LanScan({ nics, nic, onNic, onRefreshNics, nicsBusy, set
       <div className="progress">
         <div className="bar"><i style={{ width: `${pct}%` }} /></div>
         <span>{pct}% ({done}/{total || 0})</span>
-        {scanning && <button className="btn" onClick={() => api.cancelScan()}>取消</button>}
+        {owned && scanning && <button className="btn" onClick={() => api.cancelScan()}>取消</button>}
       </div>
       {error && <div className="error">{error}</div>}
       <div className="stats">

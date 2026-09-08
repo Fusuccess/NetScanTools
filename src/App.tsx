@@ -104,29 +104,34 @@ export default function App() {
           </button>
         </aside>
         <main className="main">
-          {page === "lan" && settings && (
-            <LanScan
-              nics={nics}
-              nic={nic}
-              onNic={setNic}
-              onRefreshNics={refreshNics}
-              nicsBusy={nicsBusy}
-              settings={settings}
-              scanning={scanning}
-              setScanning={setScanning}
-              onJumpPort={(ip) => {
-                setPortTarget(ip);
-                setPage("port");
-              }}
-            />
+          {settings && (
+            <div className={`pane${page === "lan" ? "" : " off"}`}>
+              <LanScan
+                nics={nics}
+                nic={nic}
+                onNic={setNic}
+                onRefreshNics={refreshNics}
+                nicsBusy={nicsBusy}
+                settings={settings}
+                active={page === "lan"}
+                scanning={scanning}
+                setScanning={setScanning}
+                onJumpPort={(ip) => {
+                  setPortTarget(ip);
+                  setPage("port");
+                }}
+              />
+            </div>
           )}
-          {page === "port" && settings && (
-            <PortScan
-              settings={settings}
-              target={portTarget}
-              scanning={scanning}
-              setScanning={setScanning}
-            />
+          {settings && (
+            <div className={`pane${page === "port" ? "" : " off"}`}>
+              <PortScan
+                settings={settings}
+                target={portTarget}
+                scanning={scanning}
+                setScanning={setScanning}
+              />
+            </div>
           )}
           {page === "ssh" && <SshTunnels onRunningCount={setTunnelCount} />}
           {page === "fwd" && <PortForward />}

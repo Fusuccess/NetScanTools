@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText, portStateLabel } from "../lib/copy";
 import { api, watchScanFinished, watchScanPort, watchScanProgress } from "../lib/tauri";
 import { COMMON_PORTS, type PortRow, type Settings } from "../lib/types";
@@ -28,6 +28,8 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   const [finished, setFinished] = useState(false);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [copied, setCopied] = useState("");
+  const [owned, setOwned] = useState(false);
+  const ownedRef = useRef(false);
 
   useEffect(() => {
     if (target) setIp(target);
@@ -36,22 +38,27 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   useEffect(() => {
     const off = [
       watchScanProgress((p) => {
+        if (!ownedRef.current) return;
         setDone(p.done);
         setTotal(p.total);
         setOpen(p.open);
         setClosed(p.closed);
         setTimeoutN(p.timeout);
       }),
-      watchScanPort((r) =>
+      watchScanPort((r) => {
+        if (!ownedRef.current) return;
         setRows((prev) => {
           const i = prev.findIndex((x) => x.port === r.port);
           if (i < 0) return [...prev, r];
           const next = [...prev];
           next[i] = r;
           return next;
-        }),
-      ),
+        });
+      }),
       watchScanFinished((p) => {
+        if (!ownedRef.current) return;
+        ownedRef.current = false;
+        setOwned(false);
         setScanning(false);
         setFinished(true);
         if (p.error) setError(p.error);
@@ -77,16 +84,20 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
     setTimeoutN(0);
     setFinished(false);
     setFilter("open");
+    ownedRef.current = true;
+    setOwned(true);
     setScanning(true);
     try {
       await api.startPortScan({ ip, ports: portsSpec(), timeoutMs, concurrency });
     } catch (e) {
+      ownedRef.current = false;
+      setOwned(false);
       setScanning(false);
       setError(String(e));
     }
   }
 
-  const status = scanning ? "扫描中" : finished ? "已完成" : "就绪";
+  const status = owned ? "扫描中" : finished ? "已完成" : "就绪";
   const pct = total ? Math.round((done / total) * 100) : 0;
   const visible = useMemo(() => {
     const list = filter === "all" ? rows : rows.filter((r) => r.state === filter);
@@ -119,8 +130,8 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
   }
 
   function emptyHint() {
-    if (scanning && rows.length === 0) return "扫描中，结果会陆续出现。";
-    if (scanning) return "当前筛选还没有匹配项，扫描仍在进行。";
+    if (owned && rows.length === 0) return "扫描中，结果会陆续出现。";
+    if (owned) return "当前筛选还没有匹配项，扫描仍在进行。";
     if (rows.length === 0) return "还没有扫描结果。填写目标 IP 后点「开始扫描」。";
     if (filter === "open") return "没有开放端口。可改看「全部」或「超时」。";
     if (filter === "closed") return "没有关闭的端口。无响应会记为超时。";
@@ -147,7 +158,7 @@ export default function PortScan({ settings, target, scanning, setScanning }: Pr
           </button>
         ))}
         <button className="btn primary" disabled={scanning || !ip} onClick={start}>开始扫描</button>
-        {scanning && <button className="btn" onClick={() => api.cancelScan()}>取消</button>}
+        {owned && scanning && <button className="btn" onClick={() => api.cancelScan()}>取消</button>}
       </div>
       {preset === "custom" && (
         <div className="toolbar">

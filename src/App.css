@@ -98,6 +98,14 @@ button { cursor: pointer; }
   display: flex;
   flex-direction: column;
 }
+.pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pane.off { display: none; }
 
 .page {
   flex: 1;
