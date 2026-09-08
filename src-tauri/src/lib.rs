@@ -284,6 +284,25 @@ fn views(app: &AppHandle, state: &AppState) -> Result<Vec<ssh::SshTunnelView>, S
         .collect())
 }
 
+#[tauri::command]
+fn open_author_site() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("https://fusuccess.top")
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", "https://fusuccess.top"])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -299,7 +318,8 @@ pub fn run() {
             save_tunnel,
             start_tunnel,
             stop_tunnel,
-            delete_tunnel
+            delete_tunnel,
+            open_author_site
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

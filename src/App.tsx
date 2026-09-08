@@ -7,8 +7,9 @@ import PortScan from "./pages/PortScan";
 import SshTunnels from "./pages/SshTunnels";
 import PortForward from "./pages/PortForward";
 import SettingsPage from "./pages/Settings";
+import About from "./pages/About";
 
-type Page = "lan" | "port" | "ssh" | "fwd" | "settings";
+type Page = "lan" | "port" | "ssh" | "fwd" | "settings" | "about";
 
 export default function App() {
   const [page, setPage] = useState<Page>("lan");
@@ -94,6 +95,7 @@ export default function App() {
           <div className="spacer" />
           <div className="side-sep" />
           {nav("settings", "设置")}
+          {nav("about", "关于")}
           <button
             className="nav-btn"
             onClick={() => settings && saveSettings({ ...settings, theme: settings.theme === "dark" ? "light" : "dark" })}
@@ -131,6 +133,7 @@ export default function App() {
           {page === "settings" && settings && (
             <SettingsPage settings={settings} onSave={saveSettings} />
           )}
+          {page === "about" && <About />}
         </main>
       </div>
     </div>

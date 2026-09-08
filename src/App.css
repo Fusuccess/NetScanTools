@@ -251,3 +251,13 @@ table.data td.placeholder {
 .form-grid .span2 { grid-column: 1 / -1; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .placeholder { color: var(--muted); padding: 40px 8px; text-align: center; }
+.about-card { max-width: 560px; }
+.about-card p { margin: 8px 0; line-height: 1.6; }
+.disclaimer { border-color: var(--warn); }
+button.link {
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+}

@@ -27,6 +27,7 @@ export const api = {
     invoke("start_tunnel", { arg: { id, password } }),
   stopTunnel: (id: string) => invoke("stop_tunnel", { arg: { id } }),
   deleteTunnel: (id: string) => invoke("delete_tunnel", { arg: { id } }),
+  openAuthorSite: () => invoke("open_author_site"),
 };
 
 function watch<T>(name: string, cb: (p: T) => void): () => void {
