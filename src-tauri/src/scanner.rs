@@ -410,7 +410,11 @@ async fn ping(ip: Ipv4Addr, timeout: Duration) -> bool {
     tokio::task::spawn_blocking(move || {
         let mut cmd = Command::new("ping");
         #[cfg(windows)]
-        cmd.args(["-n", "1", "-w", &wait.to_string(), &ip]);
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.args(["-n", "1", "-w", &wait.to_string(), &ip])
+                .creation_flags(0x08000000);
+        }
         #[cfg(unix)]
         cmd.args(["-c", "1", "-W", &wait.to_string(), &ip]);
         cmd.stdout(std::process::Stdio::null())
@@ -424,7 +428,13 @@ async fn ping(ip: Ipv4Addr, timeout: Duration) -> bool {
 }
 
 fn load_arp_table() -> HashMap<String, ArpEntry> {
-    let output = Command::new("arp").arg("-a").output();
+    let mut cmd = Command::new("arp");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let output = cmd.arg("-a").output();
     let Ok(output) = output else {
         return HashMap::new();
     };
@@ -443,7 +453,10 @@ fn lookup_one_arp(ip: Ipv4Addr) -> Option<ArpEntry> {
     let output = {
         #[cfg(windows)]
         {
-            Command::new("arp").args(["-a", &ip_s]).output()
+            use std::os::windows::process::CommandExt;
+            let mut cmd = Command::new("arp");
+            cmd.creation_flags(0x08000000);
+            cmd.args(["-a", &ip_s]).output()
         }
         #[cfg(unix)]
         {
